@@ -1,0 +1,26 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  @apply bg-background text-foreground font-sans antialiased;
+}
+
+.card-surface {
+  @apply bg-card rounded-2xl shadow-card border border-border/40;
+}
+
+.accent-gradient {
+  background: linear-gradient(135deg, rgba(239, 35, 60, 0.9), rgba(239, 35, 60, 0.4));
+}
+
