@@ -105,7 +105,8 @@ def process_file(path: Path, inplace: bool = False) -> Path:
 def main() -> None:
     p = argparse.ArgumentParser(description="Clean Copyright/footer text from CSV comment fields")
     p.add_argument("--inplace", action="store_true", help="Overwrite the original CSV files")
-    p.add_argument("--pattern", default="classie_evaluations_with_sbc_part*.csv", help="Glob pattern under frontend/public to process")
+    # default to any classie CSVs (includes classie_missing_with_sbc.csv and split parts)
+    p.add_argument("--pattern", default="classie_*.csv", help="Glob pattern under frontend/public to process")
     args = p.parse_args()
 
     base = Path(__file__).resolve().parent.parent / "frontend" / "public"
@@ -119,6 +120,20 @@ def main() -> None:
             process_file(f, inplace=args.inplace)
         except Exception as e:
             print(f"Error processing {f}: {e}")
+
+    # After processing, write a manifest of cleaned files so the frontend can enumerate them
+    cleaned_dir = base / "cleaned"
+    if cleaned_dir.exists():
+        cleaned_files = [p.name for p in sorted(cleaned_dir.glob("*.csv"))]
+        manifest_path = cleaned_dir / "index.json"
+        try:
+            import json
+
+            with manifest_path.open("w", encoding="utf-8") as mf:
+                json.dump(cleaned_files, mf, indent=2)
+            print(f"Wrote manifest: {manifest_path} ({len(cleaned_files)} files)")
+        except Exception as e:
+            print(f"Failed to write manifest {manifest_path}: {e}")
 
 
 if __name__ == "__main__":

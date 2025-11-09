@@ -15,6 +15,8 @@ Runtime / Config
 	 - `/classie_evaluations_with_sbc_part2.csv`
 	 - `/classie_evaluations_with_sbc_part3.csv`
 	 - `/classie_evaluations_with_sbc_part4.csv`
+ - Additional supplemental CSVs (if present) are also loaded. Example:
+    - `/classie_missing_with_sbc.csv` (also checked under `/cleaned/classie_missing_with_sbc.csv`)
 
 Recent changes (latest):
 - Replaced CSV upload UI with automatic load of the packaged/split CSV parts in `frontend/public`.

@@ -110,4 +110,17 @@ Notes / Next:
 
 - The script supports `--inplace` to overwrite originals; use with caution. It also accepts a `--pattern` arg to target custom glob patterns under `frontend/public`.
 
+2025-11-09 (assistant) — Load newly added CSV `classie_missing_with_sbc.csv`
+What changed:
+- The frontend dataset bootstrap was updated to also attempt loading `classie_missing_with_sbc.csv` from `frontend/public` (or `/cleaned/classie_missing_with_sbc.csv` if a cleaned copy exists).
+Why:
+- A supplemental CSV file was added to the repo and should be included in the combined dataset used by the app's UI and recommendation features.
+Files added/edited:
+- frontend/src/pages/Home.tsx
+How to verify:
+1. Ensure `frontend/public/classie_missing_with_sbc.csv` (or the cleaned variant under `frontend/public/cleaned/`) is present.
+2. Start the dev server (`npm run dev` inside `frontend`) and confirm the dataset bootstraps and additional rows from the new file are available in the UI search/listing.
+Notes / Next:
+- If some dataset parts are missing the loader will continue with the available files rather than failing the entire bootstrap. This makes the app more robust to partial data.
+
 

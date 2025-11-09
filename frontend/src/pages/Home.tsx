@@ -5,11 +5,14 @@ import { useCoursesStore } from "@/store/courses";
 import { parseCsvFiles } from "@/lib/csv";
 
 // Public files are placed at the site root (frontend/public)
-const DEFAULT_DATA_PATHS = [
-  "/classie_evaluations_with_sbc_part1.csv",
-  "/classie_evaluations_with_sbc_part2.csv",
-  "/classie_evaluations_with_sbc_part3.csv",
-  "/classie_evaluations_with_sbc_part4.csv",
+// Files to attempt to load. For each base name we prefer a cleaned copy under /cleaned/
+// if present (created by `scripts/clean_comments.py`).
+const DEFAULT_DATA_FILES = [
+  "classie_missing_with_sbc.csv",
+  "classie_evaluations_with_sbc_part1.csv",
+  "classie_evaluations_with_sbc_part2.csv",
+  "classie_evaluations_with_sbc_part3.csv",
+  "classie_evaluations_with_sbc_part4.csv",
 ];
 
 export const HomePage = () => {
@@ -26,13 +29,55 @@ export const HomePage = () => {
       setLoading(true);
       try {
         const files: File[] = [];
-        for (const path of DEFAULT_DATA_PATHS) {
-          const response = await fetch(path);
-          if (!response.ok) throw new Error(`Failed to fetch default data: ${path}`);
-          const blob = await response.blob();
-          const name = path.split("/").pop() ?? "classie_evaluations_with_sbc.csv";
-          files.push(new File([blob], name, { type: "text/csv" }));
+
+        // Prefer a manifest under /cleaned/index.json which lists cleaned CSV filenames.
+        // This allows the frontend to enumerate all files written by the cleaning script.
+        try {
+          const manifestResp = await fetch("/cleaned/index.json");
+          if (manifestResp.ok) {
+            const manifest = await manifestResp.json();
+            if (Array.isArray(manifest) && manifest.length > 0) {
+              for (const name of manifest) {
+                try {
+                  const resp = await fetch(`/cleaned/${name}`);
+                  if (!resp.ok) {
+                    console.warn(`Missing cleaned file listed in manifest: ${name}`);
+                    continue;
+                  }
+                  const blob = await resp.blob();
+                  files.push(new File([blob], name, { type: "text/csv" }));
+                } catch (err) {
+                  console.warn(`Error fetching cleaned file ${name}:`, err);
+                }
+              }
+            }
+          }
+        } catch (err) {
+          // manifest fetch failed; fall back to per-file attempts below
+          console.warn("Could not fetch /cleaned/index.json; falling back to file list", err);
         }
+
+        // If manifest didn't yield files, fall back to attempting the configured filenames.
+        if (files.length === 0) {
+          for (const baseName of DEFAULT_DATA_FILES) {
+            // prefer cleaned version if available
+            const cleanedPath = `/cleaned/${baseName}`;
+            const fallbackPath = `/${baseName}`;
+            let response = await fetch(cleanedPath);
+            if (!response.ok) {
+              response = await fetch(fallbackPath);
+            }
+            if (!response.ok) {
+              // skip this file if it's not present rather than failing all bootstrap
+              console.warn(`Dataset file not found: ${cleanedPath} or ${fallbackPath}`);
+              continue;
+            }
+            const blob = await response.blob();
+            files.push(new File([blob], baseName, { type: "text/csv" }));
+          }
+        }
+
+        if (files.length === 0) throw new Error("No dataset files found in public assets");
         const rows = await parseCsvFiles(files);
         loadRows(rows);
       } catch (error) {
