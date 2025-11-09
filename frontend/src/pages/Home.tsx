@@ -45,6 +45,14 @@ export const HomePage = () => {
   }, [courseList.length, loadRows]);
 
   const topTen = useMemo(() => visibleCourses.slice(0, 10), [visibleCourses]);
+  const PAGE_SIZE = 10;
+  const [page, setPage] = useState(0);
+  const pageCount = Math.max(1, Math.ceil(visibleCourses.length / PAGE_SIZE));
+  const pageItems = useMemo(() => visibleCourses.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE), [visibleCourses, page]);
+  useEffect(() => {
+    // reset to first page when the filter/search results change
+    setPage(0);
+  }, [visibleCourses]);
 
   if (loading && courseList.length === 0) {
     return <div className="text-sm text-foreground/60">Loading Classie Evals data…</div>;
@@ -71,14 +79,33 @@ export const HomePage = () => {
     <div className="flex flex-col gap-8">
       <TopControls />
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {topTen.map((course, index) => (
-          <CourseCard key={course.courseCode} course={course} rank={index + 1} />
+        {pageItems.map((course, index) => (
+          <CourseCard key={course.courseCode} course={course} rank={page * PAGE_SIZE + index + 1} />
         ))}
       </section>
-      {visibleCourses.length > 10 ? (
-        <div className="card-surface p-6 text-sm text-foreground/50">
-          Showing top 10 courses by easiness. Adjust search or filters to explore all{" "}
-          <span className="text-accent">{visibleCourses.length}</span> matches.
+
+      {visibleCourses.length > PAGE_SIZE ? (
+        <div className="flex items-center justify-between gap-4">
+          <div className="card-surface p-6 text-sm text-foreground/50">
+            Showing {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, visibleCourses.length)} of <span className="text-accent">{visibleCourses.length}</span> matches.
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              className="rounded-md border border-border/30 bg-transparent px-3 py-1 text-sm disabled:opacity-40"
+              disabled={page === 0}
+              onClick={() => setPage((p) => Math.max(0, p - 1))}
+            >
+              Prev
+            </button>
+            <div className="text-sm text-foreground/60">Page {page + 1} / {pageCount}</div>
+            <button
+              className="rounded-md bg-accent px-3 py-1 text-sm text-background disabled:opacity-40"
+              disabled={(page + 1) >= pageCount}
+              onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))}
+            >
+              Next
+            </button>
+          </div>
         </div>
       ) : null}
     </div>
