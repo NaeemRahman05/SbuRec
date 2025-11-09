@@ -22,6 +22,10 @@ export const HomePage = () => {
     loadRows: state.loadRows,
   }));
   const [loading, setLoading] = useState(false);
+  const [loadingPhase, setLoadingPhase] = useState<string | null>(null);
+  const [totalFiles, setTotalFiles] = useState<number>(0);
+  const [filesFetched, setFilesFetched] = useState<number>(0);
+  const [progressPercent, setProgressPercent] = useState<number>(0);
 
   useEffect(() => {
     const bootstrap = async () => {
@@ -33,13 +37,20 @@ export const HomePage = () => {
         // Prefer a manifest under /cleaned/index.json which lists cleaned CSV filenames.
         // This allows the frontend to enumerate all files written by the cleaning script.
         try {
+          setLoadingPhase("Checking for cleaned manifest...");
           const manifestResp = await fetch("/cleaned/index.json");
           if (manifestResp.ok) {
             const manifest = await manifestResp.json();
             if (Array.isArray(manifest) && manifest.length > 0) {
+              setTotalFiles(manifest.length);
+              let attempted = 0;
               for (const name of manifest) {
                 try {
+                  setLoadingPhase(`Downloading cleaned file: ${name}`);
                   const resp = await fetch(`/cleaned/${name}`);
+                  attempted += 1;
+                  setFilesFetched(attempted);
+                  setProgressPercent(Math.round((attempted / manifest.length) * 50));
                   if (!resp.ok) {
                     console.warn(`Missing cleaned file listed in manifest: ${name}`);
                     continue;
@@ -47,6 +58,9 @@ export const HomePage = () => {
                   const blob = await resp.blob();
                   files.push(new File([blob], name, { type: "text/csv" }));
                 } catch (err) {
+                  attempted += 1;
+                  setFilesFetched(attempted);
+                  setProgressPercent(Math.round((attempted / manifest.length) * 50));
                   console.warn(`Error fetching cleaned file ${name}:`, err);
                 }
               }
@@ -59,31 +73,58 @@ export const HomePage = () => {
 
         // If manifest didn't yield files, fall back to attempting the configured filenames.
         if (files.length === 0) {
+          setTotalFiles(DEFAULT_DATA_FILES.length);
+          let attempted = 0;
           for (const baseName of DEFAULT_DATA_FILES) {
             // prefer cleaned version if available
             const cleanedPath = `/cleaned/${baseName}`;
             const fallbackPath = `/${baseName}`;
-            let response = await fetch(cleanedPath);
-            if (!response.ok) {
-              response = await fetch(fallbackPath);
+            try {
+              setLoadingPhase(`Downloading ${baseName}`);
+              const respClean = await fetch(cleanedPath);
+              attempted += 1;
+              setFilesFetched(attempted);
+              if (!respClean.ok) {
+                const respFallback = await fetch(fallbackPath);
+                if (!respFallback.ok) {
+                  console.warn(`Dataset file not found: ${cleanedPath} or ${fallbackPath}`);
+                  setProgressPercent(Math.round((attempted / DEFAULT_DATA_FILES.length) * 50));
+                  continue;
+                }
+                const blob = await respFallback.blob();
+                files.push(new File([blob], baseName, { type: "text/csv" }));
+              } else {
+                const blob = await respClean.blob();
+                files.push(new File([blob], baseName, { type: "text/csv" }));
+              }
+              setProgressPercent(Math.round((attempted / DEFAULT_DATA_FILES.length) * 50));
+            } catch (err) {
+              attempted += 1;
+              setFilesFetched(attempted);
+              setProgressPercent(Math.round((attempted / DEFAULT_DATA_FILES.length) * 50));
+              console.warn(`Error fetching ${baseName}:`, err);
             }
-            if (!response.ok) {
-              // skip this file if it's not present rather than failing all bootstrap
-              console.warn(`Dataset file not found: ${cleanedPath} or ${fallbackPath}`);
-              continue;
-            }
-            const blob = await response.blob();
-            files.push(new File([blob], baseName, { type: "text/csv" }));
           }
         }
 
-        if (files.length === 0) throw new Error("No dataset files found in public assets");
-        const rows = await parseCsvFiles(files);
-        loadRows(rows);
+  if (files.length === 0) throw new Error("No dataset files found in public assets");
+  setLoadingPhase("Parsing CSV files...");
+  setProgressPercent(60);
+  const rows = await parseCsvFiles(files);
+  setProgressPercent(95);
+  loadRows(rows);
+  setProgressPercent(100);
       } catch (error) {
         console.warn("Unable to load default dataset automatically", error);
       } finally {
-        setLoading(false);
+        // give UI a moment to show 100%
+        setTimeout(() => {
+          setLoading(false);
+          setLoadingPhase(null);
+          setTotalFiles(0);
+          setFilesFetched(0);
+          setProgressPercent(0);
+        }, 300);
       }
     };
     void bootstrap();
@@ -100,7 +141,23 @@ export const HomePage = () => {
   }, [visibleCourses]);
 
   if (loading && courseList.length === 0) {
-    return <div className="text-sm text-foreground/60">Loading Classie Evals data…</div>;
+    return (
+      <div className="flex flex-col items-center gap-4 p-6">
+        <div className="w-full max-w-xl">
+          <div className="text-sm text-foreground/70 mb-2">{loadingPhase ?? "Loading dataset..."}</div>
+          <div className="w-full bg-muted/20 h-3 rounded overflow-hidden">
+            <div
+              className="h-3 bg-accent"
+              style={{ width: `${Math.min(100, Math.max(0, progressPercent))}%` }}
+            />
+          </div>
+          <div className="mt-2 text-xs text-foreground/60">
+            {totalFiles > 0 ? `Files: ${filesFetched} / ${totalFiles}` : null}
+          </div>
+        </div>
+        <div className="text-sm text-foreground/60">If this takes a while, make sure the cleaned CSVs are present in /public/cleaned/</div>
+      </div>
+    );
   }
 
   if (courseList.length === 0) {
