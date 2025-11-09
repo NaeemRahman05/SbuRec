@@ -45,12 +45,12 @@ export const HomePage = () => {
       <div className="flex flex-col gap-6">
         <TopControls />
         <div className="card-surface flex flex-col items-center gap-4 p-12 text-center">
-          <h2 className="text-2xl font-semibold text-foreground">
-            Upload Classie Evals CSV to get started
-          </h2>
+          <h2 className="text-2xl font-semibold text-foreground">No data available</h2>
           <p className="max-w-xl text-sm text-foreground/60">
-            Drop in the provided <code>classie_evaluations_with_sbc.csv</code> (or multiple CSVs).
-            We compute Bayesian-smoothed easiness scores instantly in your browser.
+            The app attempts to load the packaged dataset automatically from
+            <code> /data/classie_evaluations_with_sbc.csv</code>. If you see this message,
+            the default dataset could not be loaded. Please ensure the file is present in
+            the `public/data` directory and the dev server is serving static assets.
           </p>
         </div>
       </div>

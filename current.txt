@@ -1,0 +1,43 @@
+Project: SbuRec
+Purpose: Frontend for exploring Classie evaluation CSV data (compute and visualize course easiness, instructor stats, and comments). The app currently boots by loading the packaged CSV from `public/data` and parsing it in-browser.
+
+Stack
+- React + TypeScript (Vite)
+- Tailwind CSS
+- Zustand for client state
+- PapaParse for CSV parsing
+
+Runtime / Config
+- Dev: `npm run dev` in `frontend`
+- Static asset: `public/data/classie_evaluations_with_sbc.csv` is served as `/data/classie_evaluations_with_sbc.csv`
+
+Commands / Endpoints
+- Dev server: `npm run dev` (from `frontend`)
+
+Data / Schema
+- CSV columns expected: Course Code, Course Name, Instructor, Comment, Semester, Year, Total Students, etc.
+
+Directory
+- frontend/: Vite app (src/, public/, package.json)
+- public/data/: packaged CSV(s)
+- data/raw/: raw CSV example(s)
+
+Known limitations
+- Embedding very large CSVs into the JS bundle is discouraged; prefer `public/data/` or external storage.
+
+Next intended work
+- Optionally add a UI toggle to choose data source (static CSV vs API) and/or inline CSV embedding if explicitly requested.
+ 
+Changes in this update
+- Removed `UploadCsvButton` component and related upload UI.
+- The app now relies on the packaged CSV served at `/data/classie_evaluations_with_sbc.csv` by default.
+
+How to run
+- From the `frontend` directory: `npm run dev` to start the dev server. The dataset should load automatically.
+
+Files changed
+- frontend/src/pages/Home.tsx (empty-state copy updated)
+- frontend/src/components/UploadCsvButton.tsx (deleted)
+
+Known limitations
+- The packaged CSV must be present in `public/data` for the automatic load to work in the browser dev server.

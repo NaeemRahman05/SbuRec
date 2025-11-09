@@ -1,0 +1,55 @@
+---
+applyTo: '**'
+---
+
+Project snapshot (initial seed):
+- Repo: SbuRec
+- Purpose: Frontend app to explore and visualize Classie evaluations; CSV-based data ingestion with optional API-backed loading.
+- Stack: React + TypeScript + Vite, Tailwind CSS, Zustand for state, PapaParse for CSV parsing.
+
+Directory (top-level):
+- frontend/: Vite React app (src/, public/, package.json)
+- public/data/: packaged CSV assets (classie_evaluations_with_sbc.csv)
+- data/raw/: raw CSV samples
+
+Change log (append-only):
+
+2025-11-09 (assistant) — Add CSV parseText type fix and project snapshot
+What changed:
+- Added explicit type annotation for PapaParse error callback in `frontend/src/lib/csv.ts` to fix a TypeScript implicit-any lint error.
+- Created `changelog.txt` and `current.txt` files to seed project living documentation.
+Why:
+- Small type fix to satisfy the TypeScript linter and prevent build warnings.
+- Add persistent changelog/current files per repository maintenance rules.
+Files added/edited:
+- frontend/src/lib/csv.ts
+- changelog.txt
+- current.txt
+How to verify:
+- Run the dev server (`npm run dev` inside `frontend`) and confirm TypeScript/build no longer reports the implicit-any error from `csv.ts`.
+
+Notes / Next:
+- Consider embedding or serving the large CSV via `public/data/` (recommended) rather than bundling into JS.
+- Optionally add a UI toggle to switch between CSV and API modes if server is used later.
+
+2025-11-09 (assistant) — Remove upload UI and use packaged CSV
+What changed:
+
+- Removed the `UploadCsvButton` component from the frontend. The app no longer requires a manual CSV upload.
+- The home page empty-state copy was updated to reflect that the app auto-loads the packaged CSV from `/data/classie_evaluations_with_sbc.csv`.
+Why:
+
+- Simplify the UX by always using the packaged dataset included with the repo. This matches the project's default behavior and avoids an unnecessary upload flow.
+Files added/edited:
+
+- frontend/src/pages/Home.tsx
+- frontend/src/components/UploadCsvButton.tsx (deleted)
+How to verify:
+
+- Start the frontend dev server (`npm run dev` inside `frontend`) and confirm the app loads the Classie Evals dataset automatically.
+- Confirm there is no "Upload CSV" button in the UI and that the empty state message describes the auto-load behavior.
+Notes / Next:
+
+- If you later want an alternate data-source toggle (CSV vs remote API), add a simple switch in the UI that triggers re-fetching/parsing.
+
+
