@@ -3,10 +3,11 @@ from pathlib import Path
 from glob import glob
 import re
 import sys
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from statistics import mean
 import pandas as pd
 import chromadb
+import argparse
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
@@ -71,7 +72,9 @@ if not OPENAI_API_KEY or OPENAI_API_KEY.strip() == "" or "YOUR_OPENAI_KEY_HERE" 
 
 def find_rag_files() -> list[str]:
     # prefer parts directory
-    parts_dir = DEFAULT_RAG_PARTS_DIR
+    # check strict parts dir first (if present), then default parts dir
+    parts_dir_strict = PUBLIC_DIR / "rag_parts_strict"
+    parts_dir = parts_dir_strict if parts_dir_strict.exists() else DEFAULT_RAG_PARTS_DIR
     if parts_dir.exists():
         parts = sorted([str(p) for p in parts_dir.glob("rag_data_part*.csv")])
         if parts:
@@ -105,17 +108,66 @@ for c in REQ_COLS:
         df[c] = ""
 print(f"Loaded {len(df)} rows from rag files")
 
+# Determine run mode: 'sbc' (default) uses vectorstore + SBC filters, 'lenient' uses cleaned classie CSVs
+MODE = os.environ.get("RAG_MODE", "sbc").lower()
+
+# --- LENIENT (classie-based) dataset loader ---
+CLASSIE_CLEANED_DIR = PUBLIC_DIR / "cleaned"
+
+def find_classie_cleaned_files() -> list[Path]:
+    if not CLASSIE_CLEANED_DIR.exists():
+        return []
+    return sorted(CLASSIE_CLEANED_DIR.glob("*.csv"))
+
+def load_classie_df() -> pd.DataFrame:
+    files = find_classie_cleaned_files()
+    if not files:
+        return pd.DataFrame()
+    dfs = []
+    for f in files:
+        try:
+            dfs.append(pd.read_csv(f, low_memory=False))
+        except Exception as e:
+            print(f"Failed to read classie cleaned file {f}: {e}")
+    if not dfs:
+        return pd.DataFrame()
+    cdf = pd.concat(dfs, ignore_index=True)
+    return cdf
+
+# Load classie cleaned dataset once (used by lenient retriever)
+CLASSIE_DF = load_classie_df()
+if CLASSIE_DF is not None and not CLASSIE_DF.empty:
+    print(f"Loaded classie cleaned dataset with {len(CLASSIE_DF)} rows")
+else:
+    print("No classie cleaned CSVs found under frontend/public/cleaned/")
+
+def ensure_vectorstore_initialized() -> None:
+    """Lazily initialize OpenAI embeddings and Chroma vectorstore when MODE=='sbc'."""
+    global embeddings, vectorstore
+    if vectorstore is not None:
+        return
+    if MODE != "sbc":
+        return
+    try:
+        embeddings = OpenAIEmbeddings(api_key=OPENAI_API_KEY, model=EMBED_MODEL_NAME)
+        vectorstore = Chroma(
+            collection_name=COLLECTION_NAME,
+            persist_directory=PERSIST_DIR,
+            embedding_function=embeddings,
+        )
+        print("Initialized OpenAI embeddings and Chroma vectorstore for SBC mode")
+    except Exception as e:
+        print(f"Warning: could not initialize OpenAI/Chroma: {e}")
+        embeddings = None
+        vectorstore = None
+
 raw_client = chromadb.PersistentClient(path=PERSIST_DIR)
 raw_collection = raw_client.get_or_create_collection(COLLECTION_NAME)
 existing_count = raw_collection.count()
 print(f"Using existing Chroma collection with {existing_count} entries")
-
-embeddings = OpenAIEmbeddings(api_key=OPENAI_API_KEY, model=EMBED_MODEL_NAME)
-vectorstore = Chroma(
-    collection_name=COLLECTION_NAME,
-    persist_directory=PERSIST_DIR,
-    embedding_function=embeddings,
-)
+# Delay creating OpenAI embeddings and Chroma vectorstore until we know the MODE.
+embeddings = None
+vectorstore = None
 
 def normalize_sbc_in_question(q: str) -> Optional[str]:
     """Return canonical SBC code if present in user question (TECH/QPS/HFA+/...)."""
@@ -224,7 +276,28 @@ def build_evidence_block(metas: List[Dict[str, Any]]) -> str:
         )
     return "\n".join(parts)
 
-llm = ChatOpenAI(api_key=OPENAI_API_KEY, model=CHAT_MODEL_NAME, temperature=0)
+
+def format_brief(meta: Dict[str, Any]) -> str:
+    """Format a single meta record into a short one-line string for non-LLM fallback."""
+    code = meta.get("Course Code", "").strip()
+    name = meta.get("Course Name", "").strip()
+    inst = meta.get("Instructor", "").strip()
+    cr = meta.get("Credits", "")
+    sbc = meta.get("SBC", "")
+    pre = meta.get("Prerequisites", "")
+    ap = meta.get("A_Probability", "")
+    sh = meta.get("StudyHours Mean", "")
+    return f"{code} — {name} ({inst}; Credits {cr}; SBC {sbc}; Prereq: {pre}; A≈{ap}; Study≈{sh})"
+
+try:
+    if OPENAI_API_KEY and OPENAI_API_KEY.strip() and "YOUR_OPENAI_KEY_HERE" not in OPENAI_API_KEY:
+        llm = ChatOpenAI(api_key=OPENAI_API_KEY, model=CHAT_MODEL_NAME, temperature=0)
+    else:
+        llm = None
+        print("No OPENAI_API_KEY: LLM-based intent classification and final text generation will be disabled.")
+except Exception as e:
+    llm = None
+    print(f"Failed to initialize ChatOpenAI LLM: {e}")
 
 INTENT_PROMPT = PromptTemplate.from_template(
     """You are an SBU course advisor intent classifier.
@@ -243,8 +316,12 @@ def classify_intent(question: str) -> str:
     ql = question.lower()
     if any(tok in ql for tok in [" vs ", "versus", "compare", "which should i take", "should i do"]):
         return "COURSE_COMPARISON"
-    out = (INTENT_PROMPT | llm | intent_parser).invoke({"question": question}).strip().upper()
-    return out
+    # If LLM is available, use it for intent classification; otherwise fallback to simple heuristic
+    if llm is not None:
+        out = (INTENT_PROMPT | llm | intent_parser).invoke({"question": question}).strip().upper()
+        return out
+    # fallback: if question mentions SBC-like tokens prefer elective, otherwise interest-based
+    return "ELECTIVE_RECOMMENDATION" if normalize_sbc_in_question(question) else "INTEREST_BASED"
 
 REC_PROMPT = PromptTemplate.from_template(
     """You are a Stony Brook University course advisor.
@@ -287,11 +364,75 @@ def retrieve_candidates(question: str, sbc: Optional[str], k: int) -> List[Docum
     Retrieve via vector search; if sbc present, use metadata filter in retriever.
     Apply CourseNumber <= 450 later (client-side) to avoid Chroma filter operator issues.
     """
-    if sbc:
-        retriever = vectorstore.as_retriever(search_kwargs={"k": k, "filter": {"SBC": sbc}})
+    # dispatch by selected MODE
+    if MODE == "sbc":
+        # try to lazily initialize embeddings/vectorstore based on current MODE
+        ensure_vectorstore_initialized()
+        if vectorstore is None:
+            print("Warning: vectorstore not available after initialization attempt; falling back to lenient retrieval")
+            return retrieve_candidates_lenient(question, k)
+        if sbc:
+            retriever = vectorstore.as_retriever(search_kwargs={"k": k, "filter": {"SBC": sbc}})
+        else:
+            retriever = vectorstore.as_retriever(search_kwargs={"k": k})
+        return retriever.invoke(question)
     else:
-        retriever = vectorstore.as_retriever(search_kwargs={"k": k})
-    return retriever.invoke(question)
+        return retrieve_candidates_lenient(question, k)
+
+
+def retrieve_candidates_lenient(question: str, k: int) -> List[Document]:
+    """Keyword-based, lenient retriever using the cleaned classie CSVs.
+
+    This avoids needing a separate vector DB for the lenient mode and supports
+    queries like professor avoidance and prerequisite checks by searching
+    comments, prerequisites, course name, and instructor fields.
+    """
+    if CLASSIE_DF is None or CLASSIE_DF.empty:
+        return []
+    q = question.lower()
+    tokens = [t for t in re.findall(r"[A-Za-z0-9]+", q) if len(t) > 2]
+
+    scored: List[Tuple[float, Any]] = []
+    for _, row in CLASSIE_DF.iterrows():
+        comments = str(row.get("Valuable Comments", "") or "") + " " + str(row.get("Improvement Comments", "") or "")
+        text = " ".join([
+            str(row.get("Course Code", "") or ""),
+            str(row.get("Course Name", "") or ""),
+            str(row.get("Instructor", "") or ""),
+            str(row.get("Prerequisites", "") or ""),
+            comments,
+        ]).lower()
+        score = 0.0
+        for t in tokens:
+            if t in text:
+                score += 1.0
+
+        # small boosts from numeric metadata when available
+        try:
+            aprob = float(row.get("A_Probability", 0) or 0)
+        except Exception:
+            aprob = 0.0
+        try:
+            study = float(row.get("StudyHours Mean", 0) or 0)
+        except Exception:
+            study = 0.0
+        score += aprob * 0.05
+        if study > 0:
+            score += max(0, (5.0 - study) * 0.02)
+
+        if score > 0:
+            scored.append((score, row))
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+    docs: List[Document] = []
+    for score, row in scored[:k]:
+        # row is a pandas Series; convert to dict for metadata
+        rdict = row.to_dict() if hasattr(row, "to_dict") else dict(row)
+        content = (str(rdict.get("Valuable Comments", "")) + "\n" + str(rdict.get("Improvement Comments", ""))).strip()
+        metadata = {c: rdict.get(c, "") for c in rdict.keys()}
+        metadata["score"] = score
+        docs.append(Document(page_content=content or str(row.get("Course Name", "")), metadata=metadata))
+    return docs
 
 def professor_stats_for_code(code: str, professor: str) -> Optional[str]:
     res = raw_collection.get(where={"$and": [{"Course Code": code}, {"Instructor": professor}]})
@@ -335,7 +476,10 @@ def handle_elective(question: str) -> str:
     if not metas:
         return f"No courses found for SBC {sbc}."
     evidence = build_evidence_block(metas)
-    return (REC_PROMPT | llm | rec_parser).invoke({"question": question, "evidence": evidence})
+    if llm is not None:
+        return (REC_PROMPT | llm | rec_parser).invoke({"question": question, "evidence": evidence})
+    # Fallback: simple formatted list when LLM is not available
+    return "\n".join(format_brief(m) for m in metas) + "\n\n(LLM not available; showing basic matches)"
 
 def handle_easy_a(question: str) -> str:
     sbc = normalize_sbc_in_question(question)
@@ -349,7 +493,9 @@ def handle_easy_a(question: str) -> str:
     if not metas:
         return "No courses found."
     evidence = build_evidence_block(metas)
-    return (REC_PROMPT | llm | rec_parser).invoke({"question": question, "evidence": evidence})
+    if llm is not None:
+        return (REC_PROMPT | llm | rec_parser).invoke({"question": question, "evidence": evidence})
+    return "\n".join(format_brief(m) for m in metas) + "\n\n(LLM not available; showing basic matches)"
 
 def handle_interest(question: str) -> str:
     sbc = normalize_sbc_in_question(question) 
@@ -363,7 +509,9 @@ def handle_interest(question: str) -> str:
     if not metas:
         return "No courses matched your interests."
     evidence = build_evidence_block(metas)
-    return (REC_PROMPT | llm | rec_parser).invoke({"question": question, "evidence": evidence})
+    if llm is not None:
+        return (REC_PROMPT | llm | rec_parser).invoke({"question": question, "evidence": evidence})
+    return "\n".join(format_brief(m) for m in metas) + "\n\n(LLM not available; showing basic matches)"
 
 def handle_compare(question: str) -> str:
     codes = extract_course_codes(question)
@@ -401,9 +549,26 @@ def handle_compare(question: str) -> str:
     prof_ctx = "\n".join(prof_ctx_lines) if prof_ctx_lines else ""
 
     evidence = build_evidence_block(metas)
-    return (COMPARE_PROMPT | llm | compare_parser).invoke(
-        {"question": question, "evidence": evidence, "professor_context": prof_ctx}
-    )
+    if llm is not None:
+        return (COMPARE_PROMPT | llm | compare_parser).invoke(
+            {"question": question, "evidence": evidence, "professor_context": prof_ctx}
+        )
+    # Simple fallback compare: pick the course with higher A_Probability (then lower study hours)
+    def score_meta(m: Dict[str, Any]) -> float:
+        try:
+            ap = float(m.get("A_Probability", 0) or 0)
+        except Exception:
+            ap = 0.0
+        try:
+            sh = float(m.get("StudyHours Mean", 0) or 0)
+        except Exception:
+            sh = 0.0
+        return ap - (sh * 0.01)
+
+    scored = [(score_meta(m), m) for m in metas]
+    scored.sort(key=lambda x: x[0], reverse=True)
+    winner = scored[0][1]
+    return f"Winner={winner.get('Course Code','')}: {format_brief(winner)}\n(LLM not available; basic comparison)"
 
 def route_and_answer(question: str) -> str:
     intent = classify_intent(question)
@@ -421,7 +586,12 @@ def chat_with_rag(question: str) -> str:
     return route_and_answer(question)
 
 def main():
-    print("SBU RAG Advisor — CLI")
+    global MODE
+    p = argparse.ArgumentParser(description="SBU RAG Advisor CLI")
+    p.add_argument("--mode", choices=["sbc", "lenient"], default=MODE, help="Which retrieval mode to use: 'sbc' (vector SBC mode) or 'lenient' (classie cleaned comments)")
+    args, unknown = p.parse_known_args()
+    MODE = args.mode
+    print(f"SBU RAG Advisor — CLI (mode={MODE})")
     print("Type 'exit' to quit.")
     while True:
         q = input("\nYou: ").strip()

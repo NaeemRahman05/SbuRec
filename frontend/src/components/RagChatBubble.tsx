@@ -2,6 +2,8 @@ import { useState, useRef, useEffect } from "react";
 import { MessageSquare } from "lucide-react";
 import { useCoursesStore } from "@/store/courses";
 import { formatCredits, formatInstructorList } from "@/lib/format";
+import { parseCsvFiles } from "@/lib/csv";
+import type { CourseRow } from "@/lib/types";
 
 const SBC_OPTIONS = [
     "ARTS",
@@ -22,6 +24,9 @@ export const RagChatBubble = () => {
   const [open, setOpen] = useState(false);
   const [interest, setInterest] = useState("");
   const [sbc, setSbc] = useState(SBC_OPTIONS[0]);
+  const [mode, setMode] = useState<"sbc" | "lenient">("sbc");
+  const [cleanedLoaded, setCleanedLoaded] = useState(false);
+  const [cleanedRows, setCleanedRows] = useState<CourseRow[] | null>(null);
   const [sbcDropdownOpen, setSbcDropdownOpen] = useState(false);
   const sbcRef = useRef<HTMLDivElement | null>(null);
   const [loading, setLoading] = useState(false);
@@ -43,7 +48,7 @@ export const RagChatBubble = () => {
     return () => document.removeEventListener("click", onDocClick);
   }, []);
 
-  const localRecommend = async (interestText: string, sbcCode: string) => {
+  const localRecommend = async (interestText: string, sbcCode: string, mode: "sbc" | "lenient") => {
     const q = (interestText || "").toLowerCase().trim();
     let candidates = courseList.slice();
     if (sbcCode) {
@@ -54,7 +59,14 @@ export const RagChatBubble = () => {
     if (q) {
       const tokens = q.split(/\s+/).filter(Boolean);
       candidates = candidates.filter((c) => {
-        const hay = `${c.courseName} ${c.courseCode}`.toLowerCase();
+        const hayBase = `${c.courseName} ${c.courseCode} ${c.prerequisites ?? ""} ${c.advisory ?? ""}`.toLowerCase();
+        if (mode === "lenient") {
+          // lenient mode: prefer matches in prerequisites/advisory/instructor as well
+          const insts = Object.keys(c.instructors ?? {}).join(" ").toLowerCase();
+          const hay = `${hayBase} ${insts}`.toLowerCase();
+          return tokens.every((t) => hay.includes(t));
+        }
+        const hay = hayBase.toLowerCase();
         return tokens.every((t) => hay.includes(t));
       });
     }
@@ -77,18 +89,202 @@ export const RagChatBubble = () => {
     return lines;
   };
 
+  // --- Lenient answer generator: flexible, LLM-like local answers from cleanedRows ---
+  const answerLenient = (question: string, rows: CourseRow[]): string => {
+    const q = (question || "").trim();
+    const ql = q.toLowerCase();
+
+    const codeMatch = q.match(/\b([A-Za-z]{2,4})\s*([0-9]{3})\b/);
+    const hasCourse = !!codeMatch;
+    const courseCodeNorm = hasCourse ? `${codeMatch![1].toUpperCase()} ${codeMatch![2]}` : null;
+
+    // helpers
+    const normalizeInstructor = (s: string) => (s || "").trim();
+
+    const groupByInstructorForCourse = (code: string) => {
+      const groups: Record<string, CourseRow[]> = {};
+      for (const r of rows) {
+        if (!r.courseCode) continue;
+        if (r.courseCode.replace(/\s+/g, "").toUpperCase() !== code.replace(/\s+/g, "").toUpperCase()) continue;
+        const inst = normalizeInstructor(r.instructor) || "Unknown";
+        if (!groups[inst]) groups[inst] = [];
+        groups[inst].push(r);
+      }
+      return groups;
+    };
+
+    const computeStats = (arr: CourseRow[]) => {
+      const totalStudents = arr.reduce((s, r) => s + (r.totalStudents || 0), 0);
+      const totalA = arr.reduce((s, r) => s + ((r.gradeA || 0) + (r.gradeAminus || 0)), 0);
+      const avgARate = totalStudents > 0 ? totalA / totalStudents : 0;
+      const avgStudy = arr.reduce((s, r) => s + (r.studyHoursMean || 0), 0) / Math.max(1, arr.length);
+      return { totalStudents, avgARate, avgStudy, sections: arr.length };
+    };
+
+    // Intent: worst teacher for a course
+    if (/(worst|avoid|bad|terrible|don't take|dont take)/.test(ql) && hasCourse) {
+      const groups = groupByInstructorForCourse(courseCodeNorm!);
+      const statsList = Object.entries(groups).map(([inst, arr]) => ({ inst, stats: computeStats(arr), samples: arr }));
+      if (!statsList.length) return `No data found for ${courseCodeNorm}`;
+      // rank by avgARate ascending (worst = lowest A rate) then by avgStudy descending
+      statsList.sort((a, b) => a.stats.avgARate - b.stats.avgARate || b.stats.avgStudy - a.stats.avgStudy);
+      const worst = statsList[0];
+      const others = statsList.slice(1, 4);
+      const sampleCons: string[] = [];
+      for (const r of (worst.samples || [])) {
+        for (const c of r.improvementComments || []) {
+          if (c && sampleCons.length < 5 && !sampleCons.includes(c)) sampleCons.push(c);
+        }
+      }
+      const s = `${worst.inst} appears to be the weakest choice for ${courseCodeNorm} based on review data.
+Stats: A-rate ≈ ${(worst.stats.avgARate * 100).toFixed(1)}%; Avg study ≈ ${worst.stats.avgStudy.toFixed(1)}h; Sections=${worst.stats.sections}; Students=${worst.stats.totalStudents}.
+
+Sample negative feedback:
+${(sampleCons.length ? sampleCons.slice(0,3).map((t,i)=>`${i+1}. ${t}`).join('\n') : '(no negative comments found)')}
+
+Other instructors for this course you might consider:
+${others.map((o, i) => `${i+1}. ${o.inst} — A≈${(o.stats.avgARate*100).toFixed(1)}%; Study≈${o.stats.avgStudy.toFixed(1)}h; Sections=${o.stats.sections}`).join('\n')}`;
+      return s;
+    }
+
+    // Intent: teacher rankings (for a course or overall)
+    if (/(rank|ranking|rankings|best|top|bottom)/.test(ql) && /(teacher|instructor|professor|teacher)/.test(ql)) {
+      if (hasCourse) {
+        const groups = groupByInstructorForCourse(courseCodeNorm!);
+        const statsList = Object.entries(groups).map(([inst, arr]) => ({ inst, stats: computeStats(arr) }));
+        if (!statsList.length) return `No instructors found for ${courseCodeNorm}`;
+        statsList.sort((a, b) => b.stats.avgARate - a.stats.avgARate || a.stats.avgStudy - b.stats.avgStudy);
+        const lines = statsList.map((s, i) => `${i+1}. ${s.inst} — A≈${(s.stats.avgARate*100).toFixed(1)}%; Study≈${s.stats.avgStudy.toFixed(1)}h; Sections=${s.stats.sections}`);
+        return `Instructor ranking for ${courseCodeNorm} (best → worst):\n${lines.join('\n')}`;
+      } else {
+        // overall instructor ranking across all courses
+        const groups: Record<string, CourseRow[]> = {};
+        for (const r of rows) {
+          const inst = normalizeInstructor(r.instructor) || 'Unknown';
+          if (!groups[inst]) groups[inst] = [];
+          groups[inst].push(r);
+        }
+        const statsList = Object.entries(groups).map(([inst, arr]) => ({ inst, stats: computeStats(arr) }));
+        statsList.sort((a, b) => b.stats.avgARate - a.stats.avgARate || a.stats.avgStudy - b.stats.avgStudy);
+        const top = statsList.slice(0, 10).map((s,i) => `${i+1}. ${s.inst} — A≈${(s.stats.avgARate*100).toFixed(1)}%; Study≈${s.stats.avgStudy.toFixed(1)}h; Sections=${s.stats.sections}`);
+        return `Top instructors (overall) by A-rate:\n${top.join('\n')}`;
+      }
+    }
+
+    // If asking about a specific course (general question)
+    if (hasCourse) {
+      const code = courseCodeNorm!;
+      const matched = rows.filter((r) => (r.courseCode || '').replace(/\s+/g,'').toUpperCase() === code.replace(/\s+/g,'').toUpperCase());
+      if (!matched.length) return `No data found for ${code}`;
+      const stats = computeStats(matched);
+      const valuable = new Set<string>();
+      const improv = new Set<string>();
+      for (const r of matched) {
+        (r.valuableComments || []).forEach((c) => c && valuable.add(c));
+        (r.improvementComments || []).forEach((c) => c && improv.add(c));
+      }
+      const pros = Array.from(valuable).slice(0,3).map((t,i) => `${i+1}. ${t}`).join('\n') || '(no praise comments)';
+      const cons = Array.from(improv).slice(0,3).map((t,i) => `${i+1}. ${t}`).join('\n') || '(no improvement comments)';
+      return `Summary for ${code}:\nA-rate ≈ ${(stats.avgARate*100).toFixed(1)}%; Avg study ≈ ${stats.avgStudy.toFixed(1)}h; Based on ${stats.sections} sections.\n\nPros:\n${pros}\n\nCons:\n${cons}`;
+    }
+
+    // Fallback: free-text search over comments and course names
+    const tokens = ql.split(/\s+/).filter(Boolean);
+    const scored: { row: CourseRow; score: number }[] = [];
+    for (const r of rows) {
+      const hay = `${r.courseName} ${(r.valuableComments||[]).join(' ')} ${(r.improvementComments||[]).join(' ')} ${r.prerequisites ?? ''}`.toLowerCase();
+      let score = 0;
+      for (const t of tokens) if (hay.includes(t)) score += 1;
+      if (score > 0) scored.push({ row: r, score });
+    }
+    scored.sort((a,b)=>b.score-a.score);
+    if (!scored.length) return `Couldn't find data matching '${question}'`;
+    const top = scored.slice(0,5).map((s,i) => `${i+1}. ${s.row.courseCode} — ${s.row.courseName} (${s.row.instructor}) — excerpt: ${(s.row.valuableComments||[])[0] || (s.row.improvementComments||[])[0] || ''}`);
+    return `Top matches for '${question}':\n${top.join('\n')}`;
+  };
   const handleSubmit = async (e?: any) => {
     if (e && e.preventDefault) e.preventDefault();
     setError(null);
     setResponse(null);
     setLoading(true);
     const question = `${interest} SBC:${sbc}`.trim();
+
+    // If lenient mode selected, answer locally using cleaned CSVs (reviews + prereqs).
+    if (mode === "lenient") {
+      try {
+        // load cleaned CSVs if not already loaded
+        let parsedRows: CourseRow[] | null = null;
+        if (!cleanedLoaded) {
+          setLoading(true);
+          const manifestResp = await fetch("/cleaned/index.json");
+          let filesToLoad: string[] = [];
+          if (manifestResp.ok) {
+            const manifest = await manifestResp.json();
+            if (Array.isArray(manifest)) filesToLoad = manifest;
+          } else {
+            // fallback: try to find known cleaned filenames
+            filesToLoad = [
+              "classie_missing_with_sbc.csv",
+              "classie_evaluations_with_sbc_part1.csv",
+              "classie_evaluations_with_sbc_part2.csv",
+              "classie_evaluations_with_sbc_part3.csv",
+              "classie_evaluations_with_sbc_part4.csv",
+            ];
+          }
+          const fileObjs: File[] = [];
+          for (const name of filesToLoad) {
+            try {
+              const resp = await fetch(`/cleaned/${name}`);
+              if (!resp.ok) continue;
+              const blob = await resp.blob();
+              fileObjs.push(new File([blob], name, { type: "text/csv" }));
+            } catch (err) {
+              // skip
+            }
+          }
+          if (fileObjs.length > 0) {
+            parsedRows = await parseCsvFiles(fileObjs);
+            setCleanedRows(parsedRows);
+            setCleanedLoaded(true);
+          } else {
+            parsedRows = [];
+            setCleanedRows(parsedRows);
+            setCleanedLoaded(true);
+          }
+          setLoading(false);
+        }
+
+        // generate lenient answer using cleanedRows (prefer parsedRows if just-loaded)
+        let rows: CourseRow[] = parsedRows ?? cleanedRows ?? [];
+        if (!rows || rows.length === 0) {
+          setResponse("Lenient data not available; no cleaned CSVs found.");
+          setLoading(false);
+          return;
+        }
+
+        // Use the flexible local answerer to handle free-form queries (rankings, worst teacher, general summaries)
+        try {
+          const ans = answerLenient(interest, rows);
+          setResponse(ans);
+        } catch (err: any) {
+          setError(String(err ?? "Unknown error"));
+        }
+        setLoading(false);
+        return;
+      } catch (err: any) {
+        setError(String(err ?? "Unknown error"));
+        setLoading(false);
+        return;
+      }
+    }
+
+    // If not lenient mode, fall back to backend then client aggregates as before
     try {
       // Attempt to call a backend endpoint if available
       const res = await fetch("/api/rag", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question }),
+        body: JSON.stringify({ question, mode }),
       });
       if (res.ok) {
         const text = await res.text();
@@ -102,7 +298,7 @@ export const RagChatBubble = () => {
 
     // Fallback: local recommendation using aggregates
     try {
-      const outArr = await localRecommend(interest, sbc);
+      const outArr = await localRecommend(interest, sbc, mode);
       if (Array.isArray(outArr)) {
         if (outArr.length === 0) {
           setResponse(`No recommendations found for '${interest}' and SBC='${sbc}'.`);
@@ -126,7 +322,10 @@ export const RagChatBubble = () => {
   return (
     <div className="fixed right-6 bottom-6 z-50 w-12 h-12">
       {open ? (
-        <div className="absolute right-0 bottom-14 w-80 rounded-lg border border-border/40 bg-card p-3 shadow-lg">
+        <div
+          className="absolute right-0 bottom-14 rounded-lg border border-border/40 bg-card p-3 shadow-lg"
+          style={{ width: 'min(90vw, 480px)', maxHeight: '70vh', resize: 'both', overflow: 'auto' }}
+        >
           <div className="flex items-center justify-between">
             <div className="text-sm font-semibold">RAG Advisor</div>
             <button
@@ -137,21 +336,37 @@ export const RagChatBubble = () => {
               ✕
             </button>
           </div>
-          <div className="mt-2 text-xs text-foreground/70">Enter an interest and choose an SBC; I'll give a short recommendation.</div>
+          <div className="mt-2 text-xs text-foreground/70">Ask anything — I'll answer using the dataset (choose Lenient for data-backed answers).</div>
             <form onSubmit={handleSubmit} className="mt-3 flex flex-col gap-2">
             <input
-              className="w-full rounded-md border border-border/30 bg-transparent px-2 py-1 text-sm"
-              placeholder="Interest (e.g., programming, stats, art)"
+              className="w-full rounded-md border border-border/30 bg-transparent px-2 py-1 text-sm text-foreground"
+              placeholder={mode === "lenient" ? 'Ask anything (e.g., "Pros/Cons of MUS 119? Teacher rankings for class?")' : 'Input your interest for the SBC you need'}
               value={interest}
-              onChange={(ev) => setInterest(ev.target.value)}
+              onChange={(ev: any) => setInterest(ev.target.value)}
             />
+            <div className="flex gap-2 items-center">
+              <label className="text-xs text-foreground/70">Mode:</label>
+              <select
+                value={mode}
+                onChange={(e) => setMode(e.target.value as "sbc" | "lenient")}
+                className="w-full flex items-center justify-between rounded-md border border-border/30 bg-transparent px-2 py-1 text-sm text-foreground cursor-pointer appearance-none"
+                aria-label="Retrieval mode"
+              >
+                <option value="sbc">SBC (vector)</option>
+                <option value="lenient">Lenient (cleaned data)</option>
+              </select>
+            </div>
             {/* Custom dropdown to fully control styling across browsers */}
             <div className="relative" ref={sbcRef}>
               <div
                 role="button"
                 tabIndex={0}
-                onClick={() => setSbcDropdownOpen((o) => !o)}
+                onClick={() => {
+                  if (mode === "lenient") return;
+                  setSbcDropdownOpen((o) => !o);
+                }}
                 onKeyDown={(e) => {
+                  if (mode === "lenient") return;
                   if (e.key === "Enter" || e.key === " ") setSbcDropdownOpen((o) => !o);
                 }}
                 className="w-full flex items-center justify-between rounded-md border border-border/30 bg-transparent px-2 py-1 text-sm text-foreground cursor-pointer"
@@ -159,6 +374,9 @@ export const RagChatBubble = () => {
                 <span>{sbc}</span>
                 <span className="text-foreground/60">▾</span>
               </div>
+              {mode === "lenient" ? (
+                <div className="text-xs text-foreground/60 mt-1">SBC selection is ignored in Lenient mode.</div>
+              ) : null}
               {sbcDropdownOpen ? (
                 <ul
                   role="listbox"
@@ -215,7 +433,7 @@ export const RagChatBubble = () => {
             {error ? <div className="text-red-500">{error}</div> : null}
             {response ? <div className="whitespace-pre-wrap">{response}</div> : null}
             {!response && !error && !loading ? (
-              <div className="text-xs text-foreground/50">Prompt: "Input an interest and the SBC you need"</div>
+              <div className="text-xs text-foreground/50">Prompt: Ask anything — switch to Lenient mode for dataset-backed answers</div>
             ) : null}
             {/* Pagination controls for local recommendations */}
             {lastResults ? (
