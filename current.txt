@@ -38,6 +38,16 @@ Files added/edited (latest):
 - frontend/src/pages/Home.tsx — auto-load CSV parts
 - frontend/src/components/UploadCsvButton.tsx — replaced with no-op stub
 - frontend/src/pages/CourseDetails.tsx — tightened numeric filters
+Files added/edited (latest):
+- frontend/public/classie_evaluations_with_sbc_part1.csv — data part 1
+- frontend/public/classie_evaluations_with_sbc_part2.csv — data part 2
+- frontend/public/classie_evaluations_with_sbc_part3.csv — data part 3
+- frontend/public/classie_evaluations_with_sbc_part4.csv — data part 4
+- scripts/sanitize_and_split_large_v2.py — CSV sanitize+split utility
+- scripts/clean_comments.py — utility to clean copyright/footer text from comment fields and write cleaned copies under `frontend/public/cleaned/`
+- frontend/src/pages/Home.tsx — auto-load CSV parts
+- frontend/src/components/UploadCsvButton.tsx — replaced with no-op stub
+- frontend/src/pages/CourseDetails.tsx — tightened numeric filters
 
 Commands / Endpoints
 - Dev server: `npm run dev` (from `frontend`)

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { MessageSquare } from "lucide-react";
 import { useCoursesStore } from "@/store/courses";
 import { formatCredits, formatInstructorList } from "@/lib/format";
@@ -21,11 +21,23 @@ export const RagChatBubble = () => {
   const [open, setOpen] = useState(false);
   const [interest, setInterest] = useState("");
   const [sbc, setSbc] = useState(SBC_OPTIONS[0]);
+  const [sbcDropdownOpen, setSbcDropdownOpen] = useState(false);
+  const sbcRef = useRef<HTMLDivElement | null>(null);
   const [loading, setLoading] = useState(false);
   const [response, setResponse] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const courseList = useCoursesStore((s) => s.courseList);
+
+  useEffect(() => {
+    function onDocClick(e: MouseEvent) {
+      if (!sbcRef.current) return;
+      if (sbcRef.current.contains(e.target as Node)) return;
+      setSbcDropdownOpen(false);
+    }
+    document.addEventListener("click", onDocClick);
+    return () => document.removeEventListener("click", onDocClick);
+  }, []);
 
   const localRecommend = async (interestText: string, sbcCode: string) => {
     const q = (interestText || "").toLowerCase().trim();
@@ -119,17 +131,50 @@ export const RagChatBubble = () => {
               value={interest}
               onChange={(ev) => setInterest(ev.target.value)}
             />
-            <select
-              value={sbc}
-              onChange={(ev) => setSbc(ev.target.value)}
-              className="w-full rounded-md border border-border/30 bg-black text-red-400 px-2 py-1 text-sm appearance-none"
-            >
-              {SBC_OPTIONS.map((opt) => (
-                <option key={opt} value={opt}>
-                  {opt}
-                </option>
-              ))}
-            </select>
+            {/* Custom dropdown to fully control styling across browsers */}
+            <div className="relative" ref={sbcRef}>
+              <div
+                role="button"
+                tabIndex={0}
+                onClick={() => setSbcDropdownOpen((o) => !o)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") setSbcDropdownOpen((o) => !o);
+                }}
+                className="w-full flex items-center justify-between rounded-md border border-border/30 bg-transparent px-2 py-1 text-sm text-foreground cursor-pointer"
+              >
+                <span>{sbc}</span>
+                <span className="text-foreground/60">▾</span>
+              </div>
+              {sbcDropdownOpen ? (
+                <ul
+                  role="listbox"
+                  aria-label="SBC options"
+                  className="absolute left-0 right-0 z-40 mt-1 max-h-40 w-full overflow-auto rounded-md border border-border/30 bg-card p-1 text-sm"
+                >
+                  {SBC_OPTIONS.map((opt) => (
+                    <li
+                      key={opt}
+                      role="option"
+                      aria-selected={sbc === opt}
+                      onClick={() => {
+                        setSbc(opt);
+                        setSbcDropdownOpen(false);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          setSbc(opt);
+                          setSbcDropdownOpen(false);
+                        }
+                      }}
+                      tabIndex={0}
+                      className={`cursor-pointer rounded px-2 py-1 ${sbc === opt ? "bg-accent text-background" : "text-foreground hover:bg-muted/30"}`}
+                    >
+                      {opt}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
             <div className="flex items-center gap-2">
               <button
                 type="submit"

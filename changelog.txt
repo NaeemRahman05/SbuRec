@@ -88,4 +88,26 @@ Notes / Next:
 - Local build on the authoring machine failed due to an `EPERM` unlink error for the esbuild native binary during `npm ci`; this is an environment-specific issue and not a code bug. Suggested fix: close programs locking files, delete `node_modules\@esbuild` folder manually, then re-run `npm ci` as an elevated user.
 - If you plan to keep large CSVs long-term, consider using Git LFS or store the dataset in an external object storage and fetch at runtime.
 
+2025-11-09 (assistant) — Add comment-cleaning script
+What changed:
+
+- Added `scripts/clean_comments.py`, a small utility script that scans the split CSV parts under `frontend/public` and truncates any comment text beginning with the copyright/footer marker used in the exported Classie pages (for example: "Copyright © 2024 Stony Brook University Division ..."). Cleaned files are written to `frontend/public/cleaned/` by default; an `--inplace` flag can overwrite originals.
+
+Why:
+
+- Some CSV comment fields include verbose page footers and copyright notices copied from the Classie export; these should be removed for display and downstream processing.
+
+Files added/edited:
+
+- scripts/clean_comments.py
+
+How to verify:
+
+1. From the repo root, run: `python scripts/clean_comments.py`.
+2. Inspect `frontend/public/cleaned/` for cleaned CSV parts and verify comment fields no longer contain the copyright/footer text.
+
+Notes / Next:
+
+- The script supports `--inplace` to overwrite originals; use with caution. It also accepts a `--pattern` arg to target custom glob patterns under `frontend/public`.
+
 
