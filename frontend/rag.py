@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from glob import glob
 import re
 import sys
 from typing import Any, Dict, List, Optional
@@ -12,7 +13,12 @@ from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
 
-CSV_PATH = r"C:\Users\Apple\Downloads\rag_data.csv"
+# Data layout: prefer parts under `frontend/public/rag_parts/` created by scripts/split_rag_data.py
+BASE_DIR = Path(__file__).resolve().parent
+PUBLIC_DIR = BASE_DIR / "public"
+DEFAULT_RAG_SRC = PUBLIC_DIR / "rag_data.csv"
+DEFAULT_RAG_PARTS_DIR = PUBLIC_DIR / "rag_parts"
+
 PERSIST_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sbu_chroma_db")
 COLLECTION_NAME = "stonybrook_courses"
 
@@ -62,11 +68,42 @@ REQ_COLS = [
 if not OPENAI_API_KEY or OPENAI_API_KEY.strip() == "" or "YOUR_OPENAI_KEY_HERE" in OPENAI_API_KEY:
     print("WARNING: OPENAI_API_KEY not set. Set env var or paste into script.")
 
-df = pd.read_csv(CSV_PATH, low_memory=False)
+
+def find_rag_files() -> list[str]:
+    # prefer parts directory
+    parts_dir = DEFAULT_RAG_PARTS_DIR
+    if parts_dir.exists():
+        parts = sorted([str(p) for p in parts_dir.glob("rag_data_part*.csv")])
+        if parts:
+            return parts
+    # fallback to single file
+    if DEFAULT_RAG_SRC.exists():
+        return [str(DEFAULT_RAG_SRC)]
+    # try any rag_data*.csv under public
+    any_parts = sorted([str(p) for p in PUBLIC_DIR.glob("rag_data*.csv")])
+    return any_parts
+
+
+rag_files = find_rag_files()
+if not rag_files:
+    raise FileNotFoundError(
+        "No rag data files found. Put `rag_data.csv` in frontend/public or run scripts/split_rag_data.py to create parts under frontend/public/rag_parts/"
+    )
+
+print(f"Loading RAG files: {rag_files}")
+df_list = []
+for p in rag_files:
+    try:
+        df_list.append(pd.read_csv(p, low_memory=False))
+    except Exception as e:
+        print(f"Failed to read {p}: {e}")
+if not df_list:
+    raise ValueError("No CSVs could be read for RAG data")
+df = pd.concat(df_list, ignore_index=True)
 for c in REQ_COLS:
     if c not in df.columns:
         df[c] = ""
-print(f"Loaded {len(df)} rows from {CSV_PATH}")
+print(f"Loaded {len(df)} rows from rag files")
 
 raw_client = chromadb.PersistentClient(path=PERSIST_DIR)
 raw_collection = raw_client.get_or_create_collection(COLLECTION_NAME)
