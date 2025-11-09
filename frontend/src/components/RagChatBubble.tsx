@@ -27,6 +27,9 @@ export const RagChatBubble = () => {
   const [loading, setLoading] = useState(false);
   const [response, setResponse] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [lastResults, setLastResults] = useState<string[] | null>(null);
+  const [pageIndex, setPageIndex] = useState(0);
+  const PAGE_SIZE = 3;
 
   const courseList = useCoursesStore((s) => s.courseList);
 
@@ -64,17 +67,14 @@ export const RagChatBubble = () => {
       return (b.totalStudents ?? 0) - (a.totalStudents ?? 0);
     });
 
-    const top = candidates.slice(0, 3);
-    if (!top.length) {
-      return `No recommendations found for '${interestText}' and SBC='${sbcCode}'.`;
-    }
-    const lines = top.map((c) => {
+    const lines = candidates.map((c) => {
       const firstInstructor = Object.keys(c.instructors ?? {})[0] ?? "TBD";
       const aRate = Number.isFinite(c.aRate ?? NaN) ? `${((c.aRate ?? 0) * 100).toFixed(1)}%` : "N/A";
       const study = c.seasons && c.seasons.length ? "" : "";
       return `${c.courseCode} — ${c.courseName} (${firstInstructor}; ${formatCredits(c.credits)}; SBC: ${c.sbc.join(", ")}; Prereq: ${c.prerequisites ?? "None"}; Advisory: ${c.advisory ?? "None"}; A≈${aRate})`;
     });
-    return lines.join("\n\n");
+    if (!lines.length) return [] as string[];
+    return lines;
   };
 
   const handleSubmit = async (e?: any) => {
@@ -102,8 +102,21 @@ export const RagChatBubble = () => {
 
     // Fallback: local recommendation using aggregates
     try {
-      const out = await localRecommend(interest, sbc);
-      setResponse(out);
+      const outArr = await localRecommend(interest, sbc);
+      if (Array.isArray(outArr)) {
+        if (outArr.length === 0) {
+          setResponse(`No recommendations found for '${interest}' and SBC='${sbc}'.`);
+          setLastResults(null);
+        } else {
+          setLastResults(outArr);
+          setPageIndex(0);
+          const page = outArr.slice(0, PAGE_SIZE).join("\n\n");
+          setResponse(page);
+        }
+      } else {
+        setResponse(String(outArr));
+        setLastResults(null);
+      }
     } catch (err: any) {
       setError(String(err ?? "Unknown error"));
     }
@@ -203,6 +216,38 @@ export const RagChatBubble = () => {
             {response ? <div className="whitespace-pre-wrap">{response}</div> : null}
             {!response && !error && !loading ? (
               <div className="text-xs text-foreground/50">Prompt: "Input an interest and the SBC you need"</div>
+            ) : null}
+            {/* Pagination controls for local recommendations */}
+            {lastResults ? (
+              <div className="mt-3 flex items-center justify-between gap-2">
+                <div className="text-xs text-foreground/60">Page {pageIndex + 1} of {Math.max(1, Math.ceil(lastResults.length / PAGE_SIZE))}</div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const prev = Math.max(0, pageIndex - 1);
+                      setPageIndex(prev);
+                      setResponse(lastResults.slice(prev * PAGE_SIZE, prev * PAGE_SIZE + PAGE_SIZE).join("\n\n"));
+                    }}
+                    disabled={pageIndex === 0}
+                    className="rounded-md border border-border/30 bg-transparent px-2 py-1 text-xs disabled:opacity-40"
+                  >
+                    Prev
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const next = Math.min(Math.floor((lastResults.length - 1) / PAGE_SIZE), pageIndex + 1);
+                      setPageIndex(next);
+                      setResponse(lastResults.slice(next * PAGE_SIZE, next * PAGE_SIZE + PAGE_SIZE).join("\n\n"));
+                    }}
+                    disabled={(pageIndex + 1) * PAGE_SIZE >= lastResults.length}
+                    className="rounded-md bg-accent px-2 py-1 text-xs text-background disabled:opacity-40"
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
             ) : null}
           </div>
         </div>
