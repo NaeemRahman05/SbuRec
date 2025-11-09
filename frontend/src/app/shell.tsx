@@ -3,6 +3,7 @@ import { ReactNode, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { useCoursesStore } from "@/store/courses";
 import { UploadCsvButton } from "@/components/UploadCsvButton";
+import RagChatBubble from "@/components/RagChatBubble";
 
 interface AppShellProps {
   children: ReactNode;
@@ -56,7 +57,10 @@ export const AppShell = ({ children }: AppShellProps) => {
           Data from Classie Evals · Easiness scored via Bayesian smoothing · Built for SBU students.
         </div>
       </footer>
+      <RagChatBubble />
     </div>
+    
   );
+  
 };
 

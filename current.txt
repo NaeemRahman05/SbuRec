@@ -10,6 +10,34 @@ Stack
 Runtime / Config
 - Dev: `npm run dev` in `frontend`
 - Static asset: `public/data/classie_evaluations_with_sbc.csv` is served as `/data/classie_evaluations_with_sbc.csv`
+ - Static assets: the large CSV has been sanitized and split into four parts and is served from the frontend `public` folder as:
+	 - `/classie_evaluations_with_sbc_part1.csv`
+	 - `/classie_evaluations_with_sbc_part2.csv`
+	 - `/classie_evaluations_with_sbc_part3.csv`
+	 - `/classie_evaluations_with_sbc_part4.csv`
+
+Recent changes (latest):
+- Replaced CSV upload UI with automatic load of the packaged/split CSV parts in `frontend/public`.
+- Sanitized SBC tokens (removed numeric-only tokens and tokens longer than 6 chars) before splitting the CSV.
+- Removed the original oversize CSV blob from git history, created a backup branch before rewrite, and force-pushed a cleaned history.
+- Minor TypeScript narrow-type fixes in `frontend/src/pages/CourseDetails.tsx` to avoid `.toFixed()` on possible undefined values.
+
+Dev notes / How to build locally:
+1. From `frontend`: `npm ci` to install dependencies. If `npm ci` fails with EPERM unlink errors on `esbuild.exe` on Windows, try:
+	- Close any running dev servers/editors that may lock files.
+	- Delete `node_modules\@esbuild` directory manually.
+	- Re-run PowerShell as Administrator and run `npm ci` again.
+2. Run `npm run build` to run TypeScript and Vite build. If `tsc` is not recognized, ensure `node_modules/.bin` is available (install dev dependencies) or install TypeScript globally.
+
+Files added/edited (latest):
+- frontend/public/classie_evaluations_with_sbc_part1.csv — data part 1
+- frontend/public/classie_evaluations_with_sbc_part2.csv — data part 2
+- frontend/public/classie_evaluations_with_sbc_part3.csv — data part 3
+- frontend/public/classie_evaluations_with_sbc_part4.csv — data part 4
+- scripts/sanitize_and_split_large_v2.py — CSV sanitize+split utility
+- frontend/src/pages/Home.tsx — auto-load CSV parts
+- frontend/src/components/UploadCsvButton.tsx — replaced with no-op stub
+- frontend/src/pages/CourseDetails.tsx — tightened numeric filters
 
 Commands / Endpoints
 - Dev server: `npm run dev` (from `frontend`)

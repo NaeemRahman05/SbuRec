@@ -52,4 +52,40 @@ Notes / Next:
 
 - If you later want an alternate data-source toggle (CSV vs remote API), add a simple switch in the UI that triggers re-fetching/parsing.
 
+2025-11-09 (assistant) — Sanitize & split large CSV, remove oversized blob from git history, and fix CourseDetails typing
+What changed:
+
+- Sanitized SBC tokens in the large CSV (removed tokens that are numeric-only or longer than 6 characters) and split the CSV into four smaller parts suitable for GitHub (`frontend/public/classie_evaluations_with_sbc_part1.csv` … `_part4.csv`).
+- Added Python scripts used for sanitization and splitting (`scripts/sanitize_and_split_large_v2.py` and variants).
+- Removed the original oversized CSV from the repository history, created a backup branch before rewrite, and force-pushed a cleaned history to `origin/main` so the repo no longer contains >100MB blobs.
+- Replaced the `UploadCsvButton` component with a no-op stub and updated `Home.tsx` to auto-load the packaged CSV parts from the `frontend/public` folder.
+- Fixed TypeScript narrow typing in `frontend/src/pages/CourseDetails.tsx` by ensuring numeric-array filters check `typeof value === 'number'` before numeric comparisons (to avoid TS18048 errors).
+
+Why:
+
+- The original CSV exceeded GitHub's 100MB single-file limit and prevented pushes. Splitting and sanitizing the CSV allowed the repo to be pushed and hosted as static assets.
+- Type narrowing prevents TypeScript compile errors where `.toFixed()` is used on possibly-undefined values.
+
+Files added/edited:
+
+- frontend/public/classie_evaluations_with_sbc_part1.csv
+- frontend/public/classie_evaluations_with_sbc_part2.csv
+- frontend/public/classie_evaluations_with_sbc_part3.csv
+- frontend/public/classie_evaluations_with_sbc_part4.csv
+- scripts/sanitize_and_split_large_v2.py
+- frontend/src/pages/Home.tsx
+- frontend/src/components/UploadCsvButton.tsx
+- frontend/src/pages/CourseDetails.tsx
+
+How to verify:
+
+1. Ensure dependencies are installed in `frontend` (run `npm ci`). Note: on Windows you may need to close programs that lock native binaries (editors, previous dev servers) or run PowerShell as Administrator if you encounter EPERM errors unlinking `esbuild.exe`.
+2. From `frontend`, run `npm run build`. If TypeScript is available and deps install correctly, the build should complete.
+3. Start the dev server `npm run dev` and confirm the app loads data from the four split CSV files and the UI shows course details without upload controls.
+
+Notes / Next:
+
+- Local build on the authoring machine failed due to an `EPERM` unlink error for the esbuild native binary during `npm ci`; this is an environment-specific issue and not a code bug. Suggested fix: close programs locking files, delete `node_modules\@esbuild` folder manually, then re-run `npm ci` as an elevated user.
+- If you plan to keep large CSVs long-term, consider using Git LFS or store the dataset in an external object storage and fetch at runtime.
+
 
