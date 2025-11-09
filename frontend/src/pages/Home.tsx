@@ -107,7 +107,7 @@ export const HomePage = () => {
     return (
       <div className="flex flex-col gap-6">
         <TopControls />
-        <div c![1762690272982](image/Home/1762690272982.png)lassName="card-surface flex flex-col items-center gap-4 p-12 text-center">
+        <div className="card-surface flex flex-col items-center gap-4 p-12 text-center">
           <h2 className="text-2xl font-semibold text-foreground">No data available</h2>
           <p className="max-w-xl text-sm text-foreground/60">
             The app attempts to load the packaged dataset automatically from

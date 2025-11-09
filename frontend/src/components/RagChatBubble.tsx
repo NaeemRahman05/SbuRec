@@ -28,7 +28,9 @@ export const RagChatBubble = () => {
   const [cleanedLoaded, setCleanedLoaded] = useState(false);
   const [cleanedRows, setCleanedRows] = useState<CourseRow[] | null>(null);
   const [sbcDropdownOpen, setSbcDropdownOpen] = useState(false);
+  const [modeDropdownOpen, setModeDropdownOpen] = useState(false);
   const sbcRef = useRef<HTMLDivElement | null>(null);
+  const modeRef = useRef<HTMLDivElement | null>(null);
   const [loading, setLoading] = useState(false);
   const [response, setResponse] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -40,9 +42,15 @@ export const RagChatBubble = () => {
 
   useEffect(() => {
     function onDocClick(e: MouseEvent) {
-      if (!sbcRef.current) return;
-      if (sbcRef.current.contains(e.target as Node)) return;
+      const target = e.target as Node;
+      if (sbcRef.current && sbcRef.current.contains(target)) {
+        return;
+      }
+      if (modeRef.current && modeRef.current.contains(target)) {
+        return;
+      }
       setSbcDropdownOpen(false);
+      setModeDropdownOpen(false);
     }
     document.addEventListener("click", onDocClick);
     return () => document.removeEventListener("click", onDocClick);
@@ -346,15 +354,64 @@ ${others.map((o, i) => `${i+1}. ${o.inst} — A≈${(o.stats.avgARate*100).toFix
             />
             <div className="flex gap-2 items-center">
               <label className="text-xs text-foreground/70">Mode:</label>
-              <select
-                value={mode}
-                onChange={(e) => setMode(e.target.value as "sbc" | "lenient")}
-                className="w-full flex items-center justify-between rounded-md border border-border/30 bg-transparent px-2 py-1 text-sm text-foreground cursor-pointer appearance-none"
-                aria-label="Retrieval mode"
-              >
-                <option value="sbc">SBC (vector)</option>
-                <option value="lenient">Lenient (cleaned data)</option>
-              </select>
+              <div className="relative w-full" ref={modeRef}>
+                <div
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setModeDropdownOpen((o) => !o)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") setModeDropdownOpen((o) => !o);
+                  }}
+                  className="w-full flex items-center justify-between rounded-md border border-border/30 bg-transparent px-2 py-1 text-sm text-foreground cursor-pointer"
+                >
+                  <span>{mode === "sbc" ? "SBC (vector)" : "Lenient (cleaned data)"}</span>
+                  <span className="text-foreground/60">▾</span>
+                </div>
+                {modeDropdownOpen ? (
+                  <ul
+                    role="listbox"
+                    aria-label="Mode options"
+                    className="absolute left-0 right-0 z-40 bottom-full mb-1 max-h-40 w-full overflow-auto rounded-md border border-border/30 bg-card p-1 text-sm"
+                  >
+                    <li
+                      role="option"
+                      aria-selected={mode === "sbc"}
+                      onClick={() => {
+                        setMode("sbc");
+                        setModeDropdownOpen(false);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          setMode("sbc");
+                          setModeDropdownOpen(false);
+                        }
+                      }}
+                      tabIndex={0}
+                      className={`cursor-pointer rounded px-2 py-1 ${mode === "sbc" ? "bg-accent text-background" : "text-foreground hover:bg-muted/30"}`}
+                    >
+                      SBC (vector)
+                    </li>
+                    <li
+                      role="option"
+                      aria-selected={mode === "lenient"}
+                      onClick={() => {
+                        setMode("lenient");
+                        setModeDropdownOpen(false);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          setMode("lenient");
+                          setModeDropdownOpen(false);
+                        }
+                      }}
+                      tabIndex={0}
+                      className={`cursor-pointer rounded px-2 py-1 ${mode === "lenient" ? "bg-accent text-background" : "text-foreground hover:bg-muted/30"}`}
+                    >
+                      Lenient (cleaned data)
+                    </li>
+                  </ul>
+                ) : null}
+              </div>
             </div>
             {/* Custom dropdown to fully control styling across browsers */}
             <div className="relative" ref={sbcRef}>
