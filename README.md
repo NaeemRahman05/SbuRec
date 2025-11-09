@@ -27,43 +27,80 @@ npm run test
 
 Tests cover the Bayesian scoring and aggregation pipeline (Vitest + React Testing Library setup).
 
-## Data Ingestion & Scoring
+## SBU-Recs — what this project does
 
-1. **CSV Parsing** – Upload one or many files with the exact headers listed in the PRD. PapaParse normalizes headers, trims whitespace, and deduplicates duplicate section rows (prefers higher response counts).
-2. **Normalization** – `normalizeRow` coerces numbers, canonicalizes the course code (`CSE 214` style), splits SBC tokens (`","`, `"|"`, `";"`), and breaks Valuable/Improvement comments into arrays (`||` or newline delimiters).
-3. **Aggregation** – `aggregateCourses` groups rows by course and instructor, computing:
-   - Total students
-   - Total A-count (`Grade A + Grade A-`)
-   - Raw A-rate (`totalA / N`)
-   - Instructor-specific grade distributions and section history
-4. **Bayesian Ease Score** – Smooths toward the global A-rate using prior strength `k = 50`:
+This repository powers SBU-Recs, an interactive web app that helps Stony Brook students discover which courses and instructors are most likely to give high grades, plus read real student comments and ask an AI assistant for help. The project runs live here:
 
-   ```ts
-   easeScore = (totalA + k * globalAmean) / (N + k)
-   ```
+https://sburec.onrender.com/
 
-   This keeps small sections from dominating rankings while still rewarding consistently high A rates. The homepage sorts by `easeScore` desc, then `totalStudents`, then course code.
+Key capabilities
+- Ranked course listings using full Classie Evals grade-distribution data (all classes and sections when the full CSV is present).
+- Professor/instructor ranking by an ease score derived from actual grade distributions (Bayesian-smoothed A-rate + volume weighting).
+- Full comment visibility: view every 'valuable' and 'improvement' comment collected from Classie Evals for each course/section.
+- Built-in RAG assistant (Retrieval-Augmented Generation) and a lenient offline fallback — ask natural-language questions about courses, instructors, and trends and get concise answers powered by the local dataset or an LLM.
+- Client-side CSV ingestion and cleaning pipeline with a preference for pre-cleaned files in `frontend/public/cleaned/`.
 
-5. **Filters & Search** – Zustand stores filter state (prefix, SBC, season, year, credits toggle, search). Search is debounced (250 ms) and auto-resorts by easiness unless the user explicitly chooses another sort.
+Who this is for
+- Students choosing courses who want to prioritize GPA-friendly classes.
+- Advisors and admins who want quick overviews of grading patterns.
+- Researchers exploring course/instructor-level grade distribution trends.
 
-## UI Overview
+Quick features tour
+- Home: top-ranked courses by 'ease' (probability of A after smoothing), sortable and filterable by prefix, credits, term, and SBC tags.
+- Course detail: instructor breakdowns, historical sections, grade distribution charts, and a table of comments (valuable vs improvement) with easy filtering.
+- Professor ranking: leaderboard-style view for instructors teaching the same course or across a department.
+- Floating RAG chat bubble: ask free-text questions ("Who is the hardest instructor for CSE 214?", "Summarize pros/cons for ECO 110") and get data-backed answers. The assistant uses an LLM when API keys are available; otherwise it uses the lenient offline retriever that searches cleaned CSVs and synthesizes answers heuristically.
 
-- **Dark, modern red/black theme** powered by Tailwind + custom tokens.
-- **Top Toolbar** – Search, Sort dropdown, Filters sheet (course prefix, SBC, credits toggle, season/year, reset).
-- **Home Grid** – Top 10 easiness cards with mini A-rate bars, credits, SBC chips, and instructor highlights.
-- **Course Details** – Instructor-aware ease scores, grade distribution charts, study/attendance stats, sections table, and comment tabs (valuable vs improvement) sorted by length with season/year chips.
-- **CSV Upload** – Always available in the header; merges new data into the current state.
+Data & provenance
+- Primary source: Classie Evals exports (grade distributions + free-text comments). The project loads CSVs placed in `frontend/public/` by default and prefers cleaned versions in `frontend/public/cleaned/` when present.
+- The app retains full-grade distribution data (counts per grade bucket) so all computed rankings and charts are derived from real, per-section numbers — not heuristics alone.
+- Comments are cleaned to strip common footers and repeated signatures; the cleaning pipeline is in `scripts/clean_comments.py` and produces cleaned CSVs plus a `frontend/public/cleaned/index.json` manifest.
 
-## Render Deployment (Later)
+How the ranking works (high level)
+- Aggregate all sections for a course/instructor to compute: total students, total A-count (A + A-), and raw A-rate.
+- Apply Bayesian smoothing toward the global A-rate with a configurable prior strength to avoid small-sample bias. The smoothed 'ease' score is the primary sort key (ties broken by total students and recency).
 
-1. Build static assets: `npm run build` (emits to `frontend/dist`).
-2. Deploy dist folder to Render Static Site with build command `npm install && npm run build` and publish directory `dist`.
+RAG (Retrieval-Augmented Generation) assistant
+- Two modes:
+   - SBC / vector mode: uses OpenAI embeddings + a Chroma vectorstore to find semantically-related snippets and then an LLM to generate fluent answers (requires OPENAI_API_KEY and vectorstore initialization).
+   - Lenient / offline mode: a fast, rule-based retriever that searches the cleaned Classie CSVs for keyword matches (and lightweight heuristics like numeric boosts for grades/response counts) so you can get useful answers without an API key.
+- Use cases: "Which instructor gives the most A's for CSE 114?", "Summarize student pros and cons for BIO 203", "Show comments mentioning 'projects' for ART 101".
 
-## Notes
+Developer notes — important files
+- frontend/: React + TypeScript app (Vite). Key files:
+   - `src/pages/Home.tsx` — bootstrap & course listing (now prefers `frontend/public/cleaned/index.json` when present).
+   - `src/components/RagChatBubble.tsx` — floating assistant UI; supports mode switching and a client-side lenient answerer.
+   - `src/lib/csv.ts` — CSV parsing + normalization (PapaParse wrapper used by client-side loader).
+   - `src/store/courses.ts` — Zustand store for filters and course aggregates.
+- frontend/rag.py — a CLI helper that can run in `sbc` (vector) or `lenient` modes for interactive question answering and vector ingestion.
+- scripts/clean_comments.py — cleans comment footers and writes cleaned CSVs and a manifest used by the frontend.
+- scripts/split_rag_data.py & scripts/recombine_and_resplit_rag.py — helpers to split very large RAG datasets into <50MB parts for Chroma ingestion and web hosting.
 
-- Default dataset lives at `frontend/public/data/classie_evaluations_with_sbc.csv` (first 100 rows sampled from the full Classie Evals export for size). Replace it with the full file for complete coverage.
-- State persists to `localStorage` so filters and sort choices stick between refreshes.
-- Charts use Recharts with accessible tooltips and respect dark mode.
+Running locally (quick)
+1. Web UI
+```powershell
+cd frontend
+npm install
+npm run dev
+# open http://localhost:5173 (vite will report the actual port)
+```
+2. RAG CLI (lenient mode, no OpenAI key required)
+```powershell
+python frontend/rag.py --mode lenient
+```
+3. Recreate cleaned CSVs (if you edit cleaning rules)
+```powershell
+python scripts/clean_comments.py
+```
 
-Enjoy finding courses that maximize your GPA confidence!
+Privacy & limitations
+- The app stores and displays student comments from Classie Evals. Only use and host datasets you have permission to publish.
+- The lenient retriever is a heuristic fallback and may miss nuanced semantic matches compared to an LLM-backed retriever.
+- If you enable OpenAI for richer answers, prompts and data may be sent to the LLM provider — keep that in mind for sensitive or private comments.
+
+Contact & contribution
+- Repo owner / maintainer: see Git history for commit authors.
+- Contributions welcome: open issues or PRs, and add tests when changing parsing/aggregation logic (Vitest is configured).
+
+Thanks for using SBU-Recs — check the live site at https://sburec.onrender.com/ and feel free to open an issue here for feature requests or data concerns.
 
