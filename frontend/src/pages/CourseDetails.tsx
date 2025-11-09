@@ -63,10 +63,10 @@ export const CourseDetailsPage = () => {
   const attendanceStats = useMemo(() => {
     const means = courseRows
       .map((row) => row.attendanceMean)
-      .filter((value): value is number => Number.isFinite(value) && value > 0);
+      .filter((value): value is number => typeof value === "number" && Number.isFinite(value) && value > 0);
     const stds = courseRows
       .map((row) => row.attendanceStdDev)
-      .filter((value): value is number => Number.isFinite(value) && value >= 0);
+      .filter((value): value is number => typeof value === "number" && Number.isFinite(value) && value >= 0);
     return {
       mean: means.length > 0 ? means.reduce((sum, val) => sum + val, 0) / means.length : undefined,
       std: stds.length > 0 ? stds.reduce((sum, val) => sum + val, 0) / stds.length : undefined,
@@ -76,10 +76,10 @@ export const CourseDetailsPage = () => {
   const studyStats = useMemo(() => {
     const means = courseRows
       .map((row) => row.studyHoursMean)
-      .filter((value): value is number => Number.isFinite(value) && value > 0);
+      .filter((value): value is number => typeof value === "number" && Number.isFinite(value) && value > 0);
     const stds = courseRows
       .map((row) => row.studyHoursStdDev)
-      .filter((value): value is number => Number.isFinite(value) && value >= 0);
+      .filter((value): value is number => typeof value === "number" && Number.isFinite(value) && value >= 0);
     return {
       mean: means.length > 0 ? means.reduce((sum, val) => sum + val, 0) / means.length : undefined,
       std: stds.length > 0 ? stds.reduce((sum, val) => sum + val, 0) / stds.length : undefined,
