@@ -4,6 +4,7 @@ import { useCoursesStore } from "@/store/courses";
 import { formatCredits, formatInstructorList } from "@/lib/format";
 
 const SBC_OPTIONS = [
+    "ARTS",
   "TECH",
   "SBS+",
   "HUM",
@@ -149,7 +150,7 @@ export const RagChatBubble = () => {
                 <ul
                   role="listbox"
                   aria-label="SBC options"
-                  className="absolute left-0 right-0 z-40 mt-1 max-h-40 w-full overflow-auto rounded-md border border-border/30 bg-card p-1 text-sm"
+                  className="absolute left-0 right-0 z-40 bottom-full mb-1 max-h-40 w-full overflow-auto rounded-md border border-border/30 bg-card p-1 text-sm"
                 >
                   {SBC_OPTIONS.map((opt) => (
                     <li
@@ -181,7 +182,7 @@ export const RagChatBubble = () => {
                 className="inline-flex items-center gap-2 rounded-md bg-accent px-3 py-1 text-sm font-medium text-background"
                 disabled={loading}
               >
-                {loading ? "Thinking…" : "Ask RAG"}
+                {loading ? "Thinking…" : "Ask Wolfie"}
               </button>
               <button
                 type="button"
