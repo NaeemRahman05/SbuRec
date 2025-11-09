@@ -4,11 +4,12 @@ import { TopControls } from "@/components/TopControls";
 import { useCoursesStore } from "@/store/courses";
 import { parseCsvFiles } from "@/lib/csv";
 
+// Public files are placed at the site root (frontend/public)
 const DEFAULT_DATA_PATHS = [
-  "/data/classie_evaluations_with_sbc_part1_a.csv",
-  "/data/classie_evaluations_with_sbc_part1_b.csv",
-  "/data/classie_evaluations_with_sbc_part2_a.csv",
-  "/data/classie_evaluations_with_sbc_part2_b.csv",
+  "/classie_evaluations_with_sbc_part1.csv",
+  "/classie_evaluations_with_sbc_part2.csv",
+  "/classie_evaluations_with_sbc_part3.csv",
+  "/classie_evaluations_with_sbc_part4.csv",
 ];
 
 export const HomePage = () => {
@@ -57,9 +58,9 @@ export const HomePage = () => {
           <h2 className="text-2xl font-semibold text-foreground">No data available</h2>
           <p className="max-w-xl text-sm text-foreground/60">
             The app attempts to load the packaged dataset automatically from
-            <code> /data/classie_evaluations_with_sbc.csv</code>. If you see this message,
-            the default dataset could not be loaded. Please ensure the file is present in
-            the `public/data` directory and the dev server is serving static assets.
+            <code>/classie_evaluations_with_sbc_part1.csv</code> (and related parts).
+            If you see this message the default dataset could not be loaded. Please ensure
+            the files are present in the `frontend/public` directory and the dev server is serving static assets.
           </p>
         </div>
       </div>
