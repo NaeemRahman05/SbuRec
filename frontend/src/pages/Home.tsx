@@ -5,8 +5,10 @@ import { useCoursesStore } from "@/store/courses";
 import { parseCsvFiles } from "@/lib/csv";
 
 const DEFAULT_DATA_PATHS = [
-  "/data/classie_evaluations_with_sbc_part1.csv",
-  "/data/classie_evaluations_with_sbc_part2.csv",
+  "/data/classie_evaluations_with_sbc_part1_a.csv",
+  "/data/classie_evaluations_with_sbc_part1_b.csv",
+  "/data/classie_evaluations_with_sbc_part2_a.csv",
+  "/data/classie_evaluations_with_sbc_part2_b.csv",
 ];
 
 export const HomePage = () => {
