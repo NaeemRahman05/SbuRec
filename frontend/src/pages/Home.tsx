@@ -4,7 +4,10 @@ import { TopControls } from "@/components/TopControls";
 import { useCoursesStore } from "@/store/courses";
 import { parseCsvFiles } from "@/lib/csv";
 
-const DEFAULT_DATA_PATH = "/data/classie_evaluations_with_sbc.csv";
+const DEFAULT_DATA_PATHS = [
+  "/data/classie_evaluations_with_sbc_part1.csv",
+  "/data/classie_evaluations_with_sbc_part2.csv",
+];
 
 export const HomePage = () => {
   const { courseList, visibleCourses, loadRows } = useCoursesStore((state) => ({
@@ -19,11 +22,15 @@ export const HomePage = () => {
       if (courseList.length > 0) return;
       setLoading(true);
       try {
-        const response = await fetch(DEFAULT_DATA_PATH);
-        if (!response.ok) throw new Error("Failed to fetch default data");
-        const blob = await response.blob();
-        const file = new File([blob], "classie_evaluations_with_sbc.csv", { type: "text/csv" });
-        const rows = await parseCsvFiles([file]);
+        const files: File[] = [];
+        for (const path of DEFAULT_DATA_PATHS) {
+          const response = await fetch(path);
+          if (!response.ok) throw new Error(`Failed to fetch default data: ${path}`);
+          const blob = await response.blob();
+          const name = path.split("/").pop() ?? "classie_evaluations_with_sbc.csv";
+          files.push(new File([blob], name, { type: "text/csv" }));
+        }
+        const rows = await parseCsvFiles(files);
         loadRows(rows);
       } catch (error) {
         console.warn("Unable to load default dataset automatically", error);
